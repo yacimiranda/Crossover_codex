@@ -1,0 +1,230 @@
+# Pacotes
+if(!require(nlme)){
+  install.packages("nlme")
+  library(nlme)
+}
+
+if(!require(coda)){
+  install.packages("coda")
+  library(coda)
+}
+
+if(!require(R2OpenBUGS)){
+  install.packages("R2OpenBUGS")
+  library(R2OpenBUGS)
+}
+
+if(!require(modeest)){
+  install.packages("modeest")
+  library(modeest)
+}
+
+if(!require(xtable)){
+  install.packages("xtable")
+  library(xtable)
+}
+
+if(!require(plyr)){
+  install.packages("plyr")
+  library(plyr)
+}
+
+if(!require(plotrix)){
+  install.packages("plotrix")
+  library(plotrix)
+}
+
+if(!require(mice)){
+  install.packages("mice")
+  library(mice)
+}
+
+if(!require(writexl)){
+  install.packages("writexl")
+  library(writexl)
+}
+
+
+if(!require(monomvn)){
+  install.packages("monomvn")
+  library(monomvn)
+}
+
+si=1000
+RA1<-matrix(0,si,24)  # si simula??es e 24 par?metros
+MHPD<-matrix(0,si,168) 
+k=1
+while(k <=si) {
+  meanA1= 100  # m?dia geral
+  cv=0.05       # Coeficiente de varia??o
+  var=(cv*meanA1)^2; var # vari?ncia 
+  covar=0    # Covari?ncia 
+  #Diferen?a das m?dias 1EP
+  treatA= 167 #efeito do tratamento A
+  treatB=165.419 # Efeito do tratamento B
+  periodEffect= 0.1 # Diferen?a dos periodos
+  Num1=10 # n?mero de unidades experimentais na sequ?ncia 1
+  Num2=10  # n?mero de unidades experimentais na sequ?ncia 2
+  carryA=0 #efeito carryover do tratamento A
+  carryB=0 #efeito carryover do tratamento A
+  sigmaA = matrix(c(var, covar, covar, var), nrow = 2, ncol = 2) # Matriz de covari?ncia
+  meanBA = c(meanA1 + treatB , meanA1 + treatA+ periodEffect + carryB) # Sequ?ncia BA
+  meanAB= c(meanA1 + treatA, meanA1 + treatB + periodEffect + carryA) #Sequ?ncia AB
+  SG2data = MASS::mvrnorm(Num2, meanBA, sigmaA) # valores da Sequ?ncia 2
+  SG1data = MASS::mvrnorm(Num1, meanAB, sigmaA) # Valores da sequ?ncia 1
+  SG1data = as.data.frame(SG1data)
+  SG2data = as.data.frame(SG2data)
+  names(SG1data) = c("T1P1", "T2P2")
+  names(SG2data) = c("T2P1", "T1P2")
+  seq1 = seq(1, Num1) # gera valores de 1 at? 10
+  seq2 = seq(Num1 + 1,  Num1+Num2) # Gera valores de 11 a 20
+  s1 = rep("AB", Num1)
+  s2 = rep("BA", Num2)
+  SG1P1T1 = data.frame(subject = seq1, periodo = rep("per1", Num1), sequencia = s1, 
+                       y = SG1data$T1P1, tratamento =  rep("trat1", Num1))
+  SG1P2T2 = data.frame(subject= seq1, periodo = rep("per2", Num1), sequencia = s1, 
+                       y= SG1data$T2P2, tratamento = rep("trat2", Num1))
+  SG2P1T2 = data.frame(subject = seq2, periodo = rep("per1", Num2) , sequencia = s2, 
+                       y = SG2data$T2P1, tratamento = rep("trat2", Num2))
+  SG2P2T1 = data.frame(subject = seq2, periodo = rep("per2", Num2) , sequencia = s2, 
+                       y = SG2data$T1P2, tratamento= rep("trat1", Num2))
+  allT1 = rbind(SG1P1T1, SG2P2T1)
+  allT2 = rbind(SG1P2T2, SG2P1T2)
+  SimulationData = rbind(allT1, allT2)
+  Dados=SimulationData
+  # Transformando os dados  
+  head(Dados)
+  Dados$y[which(Dados$periodo=="per1")]
+  d=data.frame(sequencia=c(rep("AB",Num1),rep("BA",Num2)),
+               subject=1:(Num1+Num2),
+               per1=Dados$y[which(Dados$periodo=="per1")], 
+               per2=c(Dados$y[which(Dados$periodo=="per2"&Dados$sequencia=="AB")], Dados$y[which(Dados$periodo=="per2"&Dados$sequencia=="BA")]))
+  # Simular datos de una normal multivariada 
+  n= 20# Numero de observa??es a simular 
+  mu=c(0,0,0) # vector de medias 
+  sigma= diag(20,3,3)  ## Simular datos de una normal multivariada 
+  library(MASS)
+  mv=mvrnorm(n,mu,sigma)
+  #Dados com medidas repetidas 
+  DadRep=data.frame(matrix(0,20,8))
+  DadRep$X1=d[,1]
+  DadRep$X2=d[,2]
+  DadRep$X3=d[,3]+1*0+ mv[,1]
+  DadRep$X4=d[,3]+1*1+ mv[,2]
+  DadRep$X5=d[,3]+1*2+ mv[,3]
+  DadRep$X6=d[,4]+1*0+ mv[,1]
+  DadRep$X7=d[,4]+1*1+ mv[,2]
+  DadRep$X8=d[,4]+1*2+ mv[,3]
+  names(DadRep)=c("sequencia", "sujeito", "p1t1", "p1t2","p1t3","p2t1", "p2t2", "p2t3")
+
+  sink("crossoverSimples2021_3med.txt")
+  cat("
+      model{
+      
+      for(i in 1:Num1+Num2){
+      Y[i,1:3]~dmnorm(mu[i,1:3],Phi[(Trt[i,1]+1),1:3,1:3])
+      mu[i,1] <- beta0+beta1*Seq[i,1]+beta2*Prd[i,1]+beta3*Trt[i,1]+beta4*Tim[i,1]+beta5*Trt[i,1]*Tim[i,1] #+sub[i]*S[i]
+      mu[i,2] <- beta0+beta1*Seq[i,2]+beta2*Prd[i,2]+beta3*Trt[i,2]+beta4*Tim[i,2]+beta5*Trt[i,2]*Tim[i,2]  #+sub[Sub[i]]
+      mu[i,3] <- beta0+beta1*Seq[i,3]+beta2*Prd[i,3]+beta3*Trt[i,3]+beta4*Tim[i,3]+beta5*Trt[i,3]*Tim[i,3]  #+sub[Sub[i]]
+      
+      Y[i,4:6]~dmnorm(mu[i,4:6],Phi[(Trt[i,4]+1),1:3,1:3])
+      mu[i,4] <- beta0+beta1*Seq[i,4]+beta2*Prd[i,4]+beta3*Trt[i,4]+beta4*Tim[i,4]+beta5*Trt[i,4]*Tim[i,4]  #+sub[Sub[i]]
+      mu[i,5] <- beta0+beta1*Seq[i,5]+beta2*Prd[i,5]+beta3*Trt[i,5]+beta4*Tim[i,5]+beta5*Trt[i,5]*Tim[i,5]  #+sub[Sub[i]]                  
+      mu[i,6] <- beta0+beta1*Seq[i,6]+beta2*Prd[i,6]+beta3*Trt[i,6]+beta4*Tim[i,6]+beta5*Trt[i,6]*Tim[i,6]   #+sub[Sub[i]]
+      }
+      #for(j in 1:Num1+Num2){sub[j]~dnorm(0,tau2)}
+      
+      beta0~dnorm(0,0.001)
+      beta1~dnorm(0,0.001)
+      beta2~dnorm(0,0.001)
+      beta3~dnorm(0,0.001)
+      beta4~dnorm(0,0.001)
+      
+      # interaction beta5
+      beta5~dnorm(0,0.001)
+      
+      # Wishart prior for precision matrices
+      Phi[1,1:3,1:3]~dwish(R[1:3,1:3],3)
+      Phi[2,1:3,1:3]~dwish(R[1:3,1:3],3)
+      
+      # inverse gamma prior for variance of random effects
+      #tau2~dgamma(0.01,0.01)
+      
+      # find the variance and covariance matrices
+      #dpsub<-1/sqrt(tau2)
+      Sigma0[1:3,1:3]<-inverse(Phi[1,,])
+      Sigma1[1:3,1:3]<-inverse(Phi[2,,])
+      
+      }
+      ", fill=T)
+  sink()
+  
+  R=diag(0.001,3)
+  #Sub=DadRep[,2]
+  Y=DadRep[,3:8]
+  Y=as.matrix(Y)  ## para os dados serem lidos como matriz
+  
+  
+  #Trt1 ? o Teste
+  #Trt2 ? o controle
+  
+  Seq=matrix(rep(c(rep(1,10), rep(0,10)),6),20,6) #seqAB=1 SeqBA=0
+  Prd=matrix(c(rep(0,60), rep(1,60)),20,6) #Prd1=0 Prd2=1
+  Trt=matrix(c(rep(c(rep(1,10), rep(0,10)),3),rep(c(rep(0,10), rep(1,10)),3)),20,6) # Trt1=1 Trt2=0
+  Tim=matrix(rep(c(rep(1,20),rep(2,20),rep(3,20)),2),20,6) #Tim1=1 Tim2=2  Tim3=3
+  
+  nthin <- 5 # espa?amento (lag)
+  nburnin <- 38750# burn-in
+  niter <- 40000 # n?mero total de itera??es
+  nchains <-4 # n?mero de cadeias
+  
+  (niter-nburnin)*nchains
+  
+  dados <- list("Y","Seq","Prd","Trt","Tim","Num1","Num2", "R") #,"Sub")
+  parameters <- c("beta0","beta1","beta2","beta3","beta4","beta5","Sigma0","Sigma1") #, "tau2","dpsub")
+  
+  # Valores iniciais
+  
+  inits<-function()
+  {
+    list(beta0=rnorm(1,0,10),beta1=rnorm(1,0,10),beta2=rnorm(1,0,10),
+         beta3=rnorm(1,0,10),beta4=rnorm(1,0,10),beta5=rnorm(1,0,10),
+         Phi=rwish(3, diag(.02,3)))  
+  }
+  result <- bugs(dados, inits, model.file = "crossoverSimples2021_3med.txt",parameters,
+                 n.chains=nchains, n.iter=niter, 
+                 n.thin=nthin , n.burnin=nburnin, 
+                 debug=F)
+  ##################################################
+  pt11<-as.mcmc(result$sims.matrix[,]) # salva a sa?da como cadeia mcmc
+  
+  #criterios de convergencias
+  g=as.data.frame(geweke.diag(pt11)[1])$z[1:24]
+  r=raftery.diag(pt11)$resmatrix[1:24,4] 
+  h=heidel.diag(pt11)[,3][1:24]
+  if(any(abs(g[1:24])>1.96)||any(r[]>5)||any(h[]<=0.05)){next}else{
+    saveRDS(pt11,paste("cadeiamc",k,".RDS",sep=""))
+    grh=cbind(g,r,h)
+    smpt=summary(pt11)
+    smpt$statistics[1:24] #imprimir s? a media dos par?metros
+    
+   # Intervalos HPD 95%
+    hpd<-cbind(HPDinterval(pt11)[1:24,])
+    ac1=c(rep(0,24)) # contador
+    # si Zero est? no intervalo ac1=0, do contr?rio ac1=1
+    for (h in 1:24) {
+      {if(0 >= hpd[which(row.names(hpd)==row.names(hpd)[h]),][1]& 0 <=  hpd[which(row.names(hpd)==row.names(hpd)[h]),][2])
+        ac1[h]=0 else(ac1[h]=1)}
+    }
+    hpd2<-cbind(hpd,ac1)
+    RA1[k,]<-matrix(smpt$statistics[1:24],1,24)
+    MHPD[k,]<-matrix(c(RA1[k,1],hpd2[1,1:3], grh[1,1:3],RA1[k,2], hpd2[2,1:3], grh[2,1:3], RA1[k,3],hpd2[3,1:3], grh[3,1:3], RA1[k,4],hpd2[4,1:3], grh[4,1:3],RA1[k,5], hpd2[5,1:3],grh[5,1:3], RA1[k,6],hpd2[6,1:3],grh[6,1:3], RA1[k,7],hpd2[7,1:3], grh[7,1:3], RA1[k,8], hpd2[8,1:3],grh[8,1:3], RA1[k,9],hpd2[9,1:3],grh[9,1:3],
+                       RA1[k,10],hpd2[10,1:3],grh[10,1:3],RA1[k,11], hpd2[11,1:3],grh[11,1:3],RA1[k,12], hpd2[12,1:3],grh[12,1:3], RA1[k,13], hpd2[13,1:3],grh[13,1:3],RA1[k,14], hpd2[14,1:3],grh[14,1:3],RA1[k,15], hpd2[15,1:3],grh[15,1:3],RA1[k,16], hpd2[16,1:3],grh[16,1:3],RA1[k,17],hpd2[17,1:3],grh[17,1:3], 
+                       RA1[k,18],hpd2[18,1:3], grh[18,1:3], RA1[k,19], hpd2[19,1:3],grh[19,1:3], RA1[k,20], hpd2[20,1:3],grh[20,1:3], RA1[k,21], hpd2[21,1:3],grh[21,1:3], RA1[k,22], hpd2[22,1:3],grh[22,1:3], RA1[k,23], hpd2[23,1:3], grh[23,1:3], RA1[k,24], hpd2[24,1:3],grh[24,1:3]), 1,168)
+    k=k+1
+  }
+}
+
+#imprimir resultados
+saveRDS(MHPD,"Rcen2.RDS") # Arquivo R
+write_xlsx(as.data.frame(MHPD),"Rcen2.xlsx") #Arquivo excel
